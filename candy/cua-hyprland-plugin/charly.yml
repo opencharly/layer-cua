@@ -100,6 +100,25 @@ cua-hyprland-plugin:
                   LUA
                   chown "$u:$u" "$hd/cua-plugin.lua" 2>/dev/null || true
 
+                  # WRITING the include is not enough: Omarchy's hyprland.lua loads a FIXED
+                  # require() list (default.hypr.*, hypr.*), so an unreferenced file is never
+                  # executed and the plugin stays UNLOADED — measured: the driver refused
+                  # foreground input with `foreground_unavailable: production Hyprland input
+                  # plugin is unavailable`, and `hyprctl plugin list` reported none. Append the
+                  # require to hyprland.lua (idempotently, after Omarchy's own requires so the
+                  # qualified layout wins). Skipped with a clear note if the config is not Lua.
+                  hl="$hd/hyprland.lua"
+                  if [ -f "$hl" ]; then
+                    # bootstrap.lua puts ~/.config/?.lua on package.path, so `require("hypr.X")`
+                    # resolves to ~/.config/hypr/X.lua — the exact file written above.
+                    if ! grep -q 'require("hypr.cua-plugin")' "$hl"; then
+                      printf '\nrequire("hypr.cua-plugin")\n' >> "$hl"
+                    fi
+                    chown "$u:$u" "$hl" 2>/dev/null || true
+                  else
+                    echo "no hyprland.lua (non-Lua Hyprland config) — the plugin include was written but must be sourced by hand" >&2
+                  fi
+
             - check: the opt-in plugin ships its load config, and the .so is present when the guest has Hyprland
               id: cua-hyprland-plugin-artifacts
               context:
