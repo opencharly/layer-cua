@@ -1,0 +1,92 @@
+#  cua-guest — the guest-side fixings Cua Driver needs on a Wayland desktop.
+#
+#  Two small, load-bearing pieces measured on the Cua Omarchy Fleet image (spike S1):
+#
+#   1. The uinput udev rule. Cua Driver's isolated-background-input route creates a virtual
+#      keyboard/pointer via /dev/uinput so it never touches the user's focus or pointer.
+#      Without a rule making /dev/uinput group-accessible, that route cannot open the
+#      device. The rule grants group `input` read/write (the driver runs as the desktop
+#      user, who must be in that group).
+#
+#   2. The KubeVirt-friendly DHCP netplan. A cloud/containerDisk guest must DHCP on
+#      whatever NIC the hypervisor presents (enp1s0 under KubeVirt, ens3/enp0s3 under plain
+#      QEMU). On a NetworkManager distro (Arch/Omarchy) this is NOT needed — NM handles it —
+#      so the netplan is written ONLY where netplan exists (Debian/Ubuntu guests). The
+#      write is guarded on /etc/netplan's presence so the candy is correct on both.
+#
+#  This candy is deliberately distro-light and idempotent.
+version: 2026.261.1747
+cua-guest:
+    candy:
+        version: 2026.261.1747
+        description: |
+            The guest-side fixings Cua Driver needs on a Wayland desktop: the udev rule
+            that makes /dev/uinput group-accessible (the isolated-background-input route),
+            and — only where netplan exists — a DHCP netplan so a cloud/containerDisk guest
+            leases on whatever NIC the hypervisor presents (enp1s0 under KubeVirt, ens3
+            under QEMU). On NetworkManager distros the netplan is skipped. Verifiable on
+            the built image: the udev rule is present and the input group exists.
+        plan:
+            - run: install the uinput udev rule (the isolated-background-input route needs a group-accessible /dev/uinput)
+              run_as: root
+              command: |
+                  set -eu
+                  mkdir -p /etc/udev/rules.d
+                  cat > /etc/udev/rules.d/99-cua-uinput.rules <<'RULE'
+                  # cua-driver's isolated input route creates a virtual keyboard/pointer via
+                  # uinput and attaches it to its own master pair, so the user's focus and
+                  # pointer are never touched. The driver runs as the desktop user.
+                  KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"
+                  RULE
+                  chmod 0644 /etc/udev/rules.d/99-cua-uinput.rules
+
+            - run: write the DHCP netplan so a cloud/containerDisk guest leases on the hypervisor NIC (netplan distros only)
+              run_as: root
+              command: |
+                  set -eu
+                  # Only meaningful where netplan exists (Debian/Ubuntu). On Arch/Omarchy
+                  # NetworkManager already DHCPs; writing a netplan would be inert.
+                  if [ -d /etc/netplan ]; then
+                    cat > /etc/netplan/99-cua-dhcp.yaml <<'NETPLAN'
+                  # DHCP on whatever NIC the hypervisor presents (enp1s0 under KubeVirt,
+                  # ens3/enp0s3 under plain QEMU). Without it the guest never leases on Fleet.
+                  network:
+                    version: 2
+                    ethernets:
+                      all-en:
+                        match: {name: "en*"}
+                        dhcp4: true
+                        dhcp-identifier: mac
+                      all-eth:
+                        match: {name: "eth*"}
+                        dhcp4: true
+                        dhcp-identifier: mac
+                  NETPLAN
+                    chmod 0600 /etc/netplan/99-cua-dhcp.yaml
+                    echo "wrote /etc/netplan/99-cua-dhcp.yaml"
+                  else
+                    echo "no /etc/netplan (NetworkManager distro) — skipping the DHCP netplan"
+                  fi
+
+            - check: the uinput udev rule is installed (the isolated-input route needs it)
+              id: cua-guest-uinput-rule
+              context:
+                - build
+              file:
+                file: /etc/udev/rules.d/99-cua-uinput.rules
+                contains:
+                  - 'KERNEL=="uinput"'
+                  - 'GROUP="input"'
+
+            - check: the netplan was written only where netplan exists (correct on both NetworkManager and netplan distros)
+              id: cua-guest-netplan-conditional
+              context:
+                - build
+              exit_status: 0
+              command: |
+                  set -eu
+                  if [ -d /etc/netplan ]; then
+                    test -f /etc/netplan/99-cua-dhcp.yaml || { echo "netplan distro but no DHCP netplan written" >&2; exit 1; }
+                  else
+                    test ! -f /etc/netplan/99-cua-dhcp.yaml || { echo "netplan written on a non-netplan distro" >&2; exit 1; }
+                  fi

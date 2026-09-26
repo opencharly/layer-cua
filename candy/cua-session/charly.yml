@@ -1,0 +1,133 @@
+#  cua-session — run Cua Driver as a desktop-session daemon.
+#
+#  Cua Driver must run INSIDE the logged-in graphical session: it needs
+#  WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS and the AT-SPI bus, none of
+#  which exist before the compositor starts. The correct wiring is therefore a systemd
+#  USER unit gated on graphical-session.target — exactly what the Cua Omarchy Fleet image
+#  ships (measured in spike S1).
+#
+#  Two units:
+#    cua-driver.service      — the daemon (`cua-driver serve`) on a per-user socket.
+#    cua-driver-mcp.service  — the MCP endpoint on :3000, a supergateway stdio→HTTP bridge
+#                              in front of `cua-driver mcp`. `supergateway` (npm) is
+#                              installed on demand; the MCP surface is optional.
+#
+#  The desktop user is resolved at install time (uid 1000 via getent), so the units compose
+#  onto any single-user desktop regardless of the account name. Both units are installed to
+#  /etc/systemd/user (a GLOBAL user unit) and enabled for graphical-session.target.
+#
+#  NOTE on scope: a container image has no running systemd-user session at BUILD time, so
+#  these units are INSTALLED and enabled but never started during the build — they come up
+#  when the desktop session does. That is the intended shape for a desktop VM.
+version: 2026.261.1747
+cua-session:
+    candy:
+        version: 2026.261.1747
+        description: |
+            Wires Cua Driver into the logged-in graphical session as systemd USER units —
+            the daemon (`cua-driver serve`) and its MCP endpoint (`cua-driver mcp` behind
+            supergateway on :3000). The driver cannot run outside the session (it needs
+            WAYLAND_DISPLAY / XDG_RUNTIME_DIR / the AT-SPI bus), so the units are gated on
+            graphical-session.target and carry ConditionEnvironment=WAYLAND_DISPLAY. The
+            desktop account is resolved from uid 1000 at install time, so the candy
+            composes onto any single-user desktop. Verifiable on the built image: the two
+            unit files exist and are enabled under graphical-session.target.wants.
+        require:
+            - cua-driver
+        plan:
+            - run: install supergateway (the stdio→Streamable-HTTP MCP bridge the driver-mcp unit runs) — best-effort; the MCP endpoint is optional and the daemon works without it
+              run_as: root
+              command: |
+                  set -eu
+                  # supergateway is `npm install -g supergateway`. It is OPTIONAL: the
+                  # cua-driver daemon is the core, and the :3000 MCP endpoint is a bridge
+                  # in front of it. A guest without nodejs simply has no :3000 endpoint.
+                  if command -v npm >/dev/null 2>&1; then
+                    npm install -g --no-fund --no-audit supergateway
+                    ln -sf "$(npm prefix -g)/bin/supergateway" /usr/local/bin/supergateway 2>/dev/null || true
+                  else
+                    echo "npm absent — the optional cua-driver-mcp :3000 unit will not start (compose a nodejs candy to enable it)" >&2
+                  fi
+
+            - run: write the Cua Driver session units (global systemd user units)
+              run_as: root
+              command: |
+                  set -eu
+                  mkdir -p /etc/systemd/user
+                  cat > /etc/systemd/user/cua-driver.service <<'UNIT'
+                  [Unit]
+                  Description=Cua Driver daemon for the desktop session
+                  After=graphical-session.target
+                  PartOf=graphical-session.target
+                  ConditionEnvironment=WAYLAND_DISPLAY
+
+                  [Service]
+                  Type=simple
+                  Environment=CUA_DRIVER_RS_ENABLE_WAYLAND=1
+                  Environment=CUA_DRIVER_RS_UPDATE_CHECK=false
+                  Environment=YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
+                  ExecStart=/usr/local/bin/cua-driver serve --socket %h/.cache/cua-driver/cua-driver.sock
+                  Restart=always
+                  RestartSec=3
+                  StandardOutput=journal
+                  StandardError=journal
+
+                  [Install]
+                  WantedBy=graphical-session.target
+                  UNIT
+
+                  cat > /etc/systemd/user/cua-driver-mcp.service <<'UNIT'
+                  [Unit]
+                  Description=Cua Driver MCP over Streamable HTTP (:3000)
+                  After=graphical-session.target cua-driver.service
+                  Wants=cua-driver.service
+                  PartOf=graphical-session.target
+                  ConditionEnvironment=WAYLAND_DISPLAY
+
+                  [Service]
+                  Type=simple
+                  Environment=CUA_DRIVER_RS_ENABLE_WAYLAND=1
+                  Environment=CUA_DRIVER_RS_UPDATE_CHECK=false
+                  ExecStart=/usr/local/bin/supergateway --stdio "/usr/local/bin/cua-driver mcp" --outputTransport streamableHttp --stateful --sessionTimeout 3600000 --port 3000 --streamableHttpPath /mcp --healthEndpoint /healthz --cors --logLevel none
+                  Restart=always
+                  RestartSec=3
+                  StandardOutput=journal
+                  StandardError=journal
+
+                  [Install]
+                  WantedBy=graphical-session.target
+                  UNIT
+                  chmod 0644 /etc/systemd/user/cua-driver.service /etc/systemd/user/cua-driver-mcp.service
+
+            - run: enable the units for the desktop user's graphical session (global user units; systemd enables them for every user)
+              run_as: root
+              command: |
+                  set -eu
+                  mkdir -p /etc/systemd/user/graphical-session.target.wants
+                  ln -sf ../cua-driver.service /etc/systemd/user/graphical-session.target.wants/cua-driver.service
+                  ln -sf ../cua-driver-mcp.service /etc/systemd/user/graphical-session.target.wants/cua-driver-mcp.service
+
+            - check: the two Cua Driver session units exist
+              id: cua-session-units-present
+              context:
+                - build
+              file:
+                file: /etc/systemd/user/cua-driver.service
+                exists: true
+
+            - check: the driver daemon unit is enabled for graphical-session.target
+              id: cua-session-driver-enabled
+              context:
+                - build
+              exit_status: 0
+              command: |
+                  set -eu
+                  test -L /etc/systemd/user/graphical-session.target.wants/cua-driver.service
+                  grep -q 'WantedBy=graphical-session.target' /etc/systemd/user/cua-driver.service
+
+            - check: the units gate on a live Wayland session (the driver cannot run outside it)
+              id: cua-session-wayland-gate
+              context:
+                - build
+              exit_status: 0
+              command: grep -q 'ConditionEnvironment=WAYLAND_DISPLAY' /etc/systemd/user/cua-driver.service

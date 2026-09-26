@@ -1,0 +1,75 @@
+version: 2026.261.1747
+#  opencharly/layer-cua — Cua Driver (trycua/cua) on a live desktop, as charly candies.
+#
+#  SHAPE: one repo, one external pin per member under candy/<name>/.
+#
+#  Cua Driver is the background computer-use driver that drives a desktop's apps via the
+#  accessibility (AT-SPI) tree and input, plus window enumeration and screenshots. These
+#  candies install the driver, run it as a desktop-session daemon, expose the
+#  computer-server HTTP/MCP surface, and — opt-in — build the ABI-pinned Hyprland plugin
+#  for isolated background input. They compose onto any desktop VM/pod (the check beds in
+#  opencharly/distro-omarchy compose them onto the Omarchy VM).
+#
+#  The driver is a USER-SESSION daemon: it needs WAYLAND_DISPLAY, XDG_RUNTIME_DIR,
+#  DBUS_SESSION_BUS_ADDRESS and the AT-SPI bus, which only exist once a graphical session
+#  is up. Every service member therefore declares a systemd USER unit gated on
+#  graphical-session.target (the same wiring the Cua Omarchy Fleet image ships).
+repo: github.com/opencharly/layer-cua
+defaults:
+    platform:
+        - linux/amd64
+discover:
+    - path: candy
+      recursive: true
+
+#  A build bed proving the driver candy installs cleanly on an Arch base: the pinned
+#  release extracts, the aux files stay together, the symlink resolves, and the driver
+#  prints a version. `disposable: true` authorizes teardown; the base is the arch box.
+check-cua-driver-box:
+    pod:
+        image: cua-driver-test
+        disposable: true
+        lifecycle: dev
+        description: >-
+            Proves the cua-driver candy installs the pinned Cua Driver release with its
+            aux files together and a working symlink on an Arch base, and that the
+            cua-session candy writes + enables its graphical-session user units.
+        plan:
+            - check: the driver binary and its aux files are present together
+              id: layer-cua-driver-files
+              context: [runtime]
+              command:
+                  command: |
+                      set -eu
+                      for f in cua-driver cua-cursor-theme libcua_driver_sdk.so; do
+                        test -e "/opt/cua-driver/$f"
+                      done
+                      test -x /usr/local/bin/cua-driver
+            - check: the driver runs and prints a version through the symlink
+              id: layer-cua-driver-version
+              context: [runtime]
+              command:
+                  command: cua-driver --version
+              stdout:
+                  - matches: '[0-9]+\.[0-9]+\.[0-9]+'
+            - check: the session units are installed and enabled on graphical-session.target
+              id: layer-cua-session-units
+              context: [runtime]
+              file:
+                  file: /etc/systemd/user/graphical-session.target.wants/cua-driver.service
+                  exists: true
+            - check: the uinput udev rule is installed
+              id: layer-cua-uinput
+              context: [runtime]
+              file:
+                  file: /etc/udev/rules.d/99-cua-uinput.rules
+                  contains:
+                      - 'GROUP="input"'
+cua-driver-test:
+    candy:
+        description: minimal Arch box composing the layer-cua driver + session + guest candies
+        base: arch
+        candy:
+            - cua-driver
+            - cua-session
+            - cua-guest

@@ -1,0 +1,90 @@
+#  cua-driver — the Cua Driver binary + its runtime dependencies.
+#
+#  Cua Driver (trycua/cua) is the background computer-use driver: it drives a desktop's
+#  apps via the accessibility (AT-SPI) tree and input, and enumerates windows and captures
+#  screenshots. This candy installs the pinned release binary and the runtime libraries it
+#  links against.
+#
+#  LAYOUT MATTERS: the driver resolves its AUXILIARY files relative to its own REAL path
+#  (`/proc/self/exe`), so the binary, `cua-cursor-theme`, `libcua_driver_sdk.so`,
+#  `cua_driver_node_runtime.node` and `wayland-helper/` must stay TOGETHER in one
+#  directory. The whole archive therefore lands in /opt/cua-driver/, and
+#  /usr/local/bin/cua-driver is a SYMLINK into it (the AUR package's exact reasoning).
+#  Scattering the files across /usr/bin and /usr/share would break aux-file resolution.
+#
+#  The driver is a USER-SESSION daemon — this candy only installs the binary; the session
+#  wiring is the sibling `cua-session` candy. The opt-in Hyprland isolated-input plugin is
+#  `cua-hyprland-plugin`.
+version: 2026.261.1747
+cua-driver:
+    candy:
+        version: 2026.261.1747
+        description: |
+            The Cua Driver binary (trycua/cua) — the background computer-use driver that
+            drives a desktop's apps via the AT-SPI accessibility tree and input, with
+            window enumeration and screenshots. Installs the pinned release archive into
+            /opt/cua-driver (the binary's aux files resolve relative to its real path, so
+            they stay together) and symlinks /usr/local/bin/cua-driver into it, plus the
+            runtime libraries the binary links against (libxi, glibc, libxkbcommon) and the
+            AT-SPI bus. The driver runs as a desktop-session daemon; the `cua-session`
+            candy wires that. Verifiable on the built image: the binary and its aux files
+            are present and `cua-driver --version` prints a version.
+        distro:
+            arch:
+                package:
+                    - libxi
+                    - libxkbcommon
+                    - at-spi2-core
+                    # ffmpeg + wf-recorder back the trajectory-recording methods;
+                    # ydotool backs the driver's synthetic-input route.
+                    - ffmpeg
+                    - wf-recorder
+                    - ydotool
+        plan:
+            - run: install the pinned Cua Driver release into /opt/cua-driver (binary + aux files together — the driver resolves aux files relative to its real path)
+              download: "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.29.1/cua-driver-rs-0.29.1-linux-x86_64-binary.tar.gz"
+              extract: tar.gz
+              to: /opt/cua-driver
+              run_as: root
+              uninstall:
+                - /opt/cua-driver
+                - /usr/local/bin/cua-driver
+                - /usr/local/bin/cua-cursor-theme
+
+            - run: symlink the driver and its cursor-theme compiler onto PATH
+              run_as: root
+              command: |
+                  set -eu
+                  ln -sf /opt/cua-driver/cua-driver /usr/local/bin/cua-driver
+                  ln -sf /opt/cua-driver/cua-cursor-theme /usr/local/bin/cua-cursor-theme
+
+            - run: disable Cua Driver's default-on content-free telemetry (an unattended CI image should not phone home; the operator can re-enable it)
+              run_as: "${USER}"
+              command: |
+                  set -eu
+                  # `telemetry disable` writes the preference under the user's home. At
+                  # build time that is the image user's home; a persistent preference
+                  # survives upgrades. Best-effort: an older build without the subcommand
+                  # must not fail the image.
+                  cua-driver telemetry disable 2>/dev/null || true
+
+            - check: the Cua Driver binary and its aux files are installed together
+              id: cua-driver-installed
+              context:
+                - build
+              exit_status: 0
+              command: |
+                  set -eu
+                  for f in cua-driver cua-cursor-theme libcua_driver_sdk.so cua_driver_node_runtime.node; do
+                    test -e "/opt/cua-driver/$f" || { echo "missing: /opt/cua-driver/$f" >&2; exit 1; }
+                  done
+                  test -x /usr/local/bin/cua-driver || { echo "missing symlink /usr/local/bin/cua-driver" >&2; exit 1; }
+
+            - check: the driver resolves its aux files and prints a version (proves the real-path aux resolution works through the symlink)
+              id: cua-driver-version
+              context:
+                - build
+              exit_status: 0
+              command: cua-driver --version
+              stdout:
+                - matches: '[0-9]+\.[0-9]+\.[0-9]+'
