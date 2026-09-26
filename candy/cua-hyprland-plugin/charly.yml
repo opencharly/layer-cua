@@ -131,3 +131,26 @@ cua-hyprland-plugin:
                     test -f /usr/lib/cua/hyprland/cua-hyprland-plugin.so || { echo "Hyprland present but plugin .so missing" >&2; exit 1; }
                   fi
                   echo "cua-hyprland-plugin artifacts checked"
+
+            - check: the plugin is actually WIRED into the compositor's config (not merely present)
+              id: cua-hyprland-plugin-wired
+              context:
+                - build
+              exit_status: 0
+              command: |
+                  set -eu
+                  # WRITING the include is not loading it: Omarchy's hyprland.lua loads a FIXED
+                  # require() list, so an unreferenced cua-plugin.lua is never executed and the
+                  # plugin stays UNLOADED (the defect this check exists to catch — the driver
+                  # refused input with `foreground_unavailable`). Assert the require is present
+                  # in hyprland.lua whenever the plugin was built. FAILS without the fix.
+                  if [ ! -f /usr/lib/cua/hyprland/cua-hyprland-plugin.so ]; then
+                    echo "plugin not built (skipped) — nothing to wire"
+                    exit 0
+                  fi
+                  u="$(getent passwd 1000 | cut -d: -f1)"
+                  hl="/home/$u/.config/hypr/hyprland.lua"
+                  test -f "$hl" || { echo "hyprland.lua missing after Hyprland was present" >&2; exit 1; }
+                  grep -q 'require("hypr.cua-plugin")' "$hl" \
+                    || { echo "the plugin include is written but hyprland.lua never requires it — the plugin will NOT load" >&2; exit 1; }
+                  echo "cua-hyprland-plugin is wired into hyprland.lua"
