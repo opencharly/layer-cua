@@ -68,7 +68,11 @@ check-cua-driver-box:
 cua-driver-test:
     candy:
         description: minimal Arch box composing the layer-cua driver + session + guest candies
-        base: arch
+        base: quay.io/archlinux/archlinux:base-20260719.0.558306
+        build:
+            - pac
+        distro:
+            - arch
         candy:
             - cua-driver
             - cua-session

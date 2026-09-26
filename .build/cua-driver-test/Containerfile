@@ -1,0 +1,257 @@
+# .build/cua-driver-test/Containerfile (generated -- do not edit)
+
+ARG BASE_IMAGE=quay.io/archlinux/archlinux:base-20260719.0.558306
+
+FROM scratch AS cua-driver
+COPY candy/cua-driver/ /
+
+FROM scratch AS cua-session
+COPY candy/cua-session/ /
+
+FROM scratch AS cua-guest
+COPY candy/cua-guest/ /
+
+FROM ${BASE_IMAGE}
+
+# Bootstrap
+RUN --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked \
+    pacman-key --init && pacman -Syu --noconfirm --needed curl ca-certificates && \
+    { [ -L /usr/local ] && mkdir -p "$(readlink /usr/local)"; mkdir -p /usr/local/bin; } && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in x86_64) ARCH=amd64;; aarch64) ARCH=arm64;; esac && \
+    TASK_URL="https://github.com/go-task/task/releases/latest/download/task_linux_${ARCH}.tar.gz" && \
+    (curl -fsSL "$TASK_URL" || wget -qO- "$TASK_URL") | tar -xzf - -C /usr/local/bin task
+
+RUN if ! getent passwd 1000 >/dev/null 2>&1; then \
+      LOGIN_SHELL=/bin/sh; [ -x /bin/bash ] && LOGIN_SHELL=/bin/bash; \
+      if command -v useradd >/dev/null 2>&1; then \
+        (getent group 1000 >/dev/null 2>&1 || groupadd -g 1000 user) && \
+        useradd -m -u 1000 -g 1000 -s "$LOGIN_SHELL" user; \
+      else \
+        (getent group 1000 >/dev/null 2>&1 || addgroup -g 1000 user) && \
+        adduser -D -h /home/user -u 1000 -G user -s "$LOGIN_SHELL" user; \
+      fi; \
+    fi
+
+WORKDIR /home/user
+
+# Layer: cua-driver
+ARG TARGETARCH
+ENV ARCH=${TARGETARCH}
+RUN --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked \
+pacman-key --init && \
+# Reseed pacman keyring from the locally-installed
+# keyring packages (cachyos-keyring, archlinux-keyring).
+# `--populate` is local-only and FAST (sub-second per
+# repo); does NOT do keyserver roundtrips. Non-fatal
+# (`|| true`) so air-gapped / restricted-network builds
+# succeed when the keyring was already current.
+(pacman-key --populate 2>/dev/null || true) && \
+OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm --needed libxi libxkbcommon at-spi2-core ffmpeg wf-recorder ydotool
+RUN --mount=type=cache,id=charly-tmp-downloads,dst=/tmp/downloads,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH" -c "$1"' sh 'export BUILD_ARCH=$(uname -m); mkdir -p /tmp/downloads; __u="https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.29.1/cua-driver-rs-0.29.1-linux-x86_64-binary.tar.gz"; __c=/tmp/downloads/$(printf %s "$__u" | sha256sum | cut -c1-64); [ -s "$__c" ] || { curl -fsSL "$__u" -o "$__c.part" && mv -f "$__c.part" "$__c"; } && mkdir -p /opt/cua-driver && tar -xzf "$__c" -C /opt/cua-driver '
+RUN --mount=type=bind,from=cua-driver,source=/,target=/ctx --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+ln -sf /opt/cua-driver/cua-driver /usr/local/bin/cua-driver
+ln -sf /opt/cua-driver/cua-cursor-theme /usr/local/bin/cua-cursor-theme
+OVCMD
+USER 1000
+RUN --mount=type=bind,from=cua-driver,source=/,target=/ctx --mount=type=cache,id=charly-tmp-npm-cache-uid1000,dst=/tmp/npm-cache,uid=1000,gid=1000 sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+# `telemetry disable` writes the preference under the user's home. At
+# build time that is the image user's home; a persistent preference
+# survives upgrades. Best-effort: an older build without the subcommand
+# must not fail the image.
+cua-driver telemetry disable 2>/dev/null || true
+OVCMD
+USER root
+
+# Layer: cua-session
+ARG TARGETARCH
+ENV ARCH=${TARGETARCH}
+RUN --mount=type=bind,from=cua-session,source=/,target=/ctx --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+# supergateway is `npm install -g supergateway`. It is OPTIONAL: the
+# cua-driver daemon is the core, and the :3000 MCP endpoint is a bridge
+# in front of it. A guest without nodejs simply has no :3000 endpoint.
+if command -v npm >/dev/null 2>&1; then
+  npm install -g --no-fund --no-audit supergateway
+  ln -sf "$(npm prefix -g)/bin/supergateway" /usr/local/bin/supergateway 2>/dev/null || true
+else
+  echo "npm absent — the optional cua-driver-mcp :3000 unit will not start (compose a nodejs candy to enable it)" >&2
+fi
+OVCMD
+RUN --mount=type=bind,from=cua-session,source=/,target=/ctx --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+mkdir -p /etc/systemd/user
+cat > /etc/systemd/user/cua-driver.service <<'UNIT'
+[Unit]
+Description=Cua Driver daemon for the desktop session
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+Environment=CUA_DRIVER_RS_ENABLE_WAYLAND=1
+Environment=CUA_DRIVER_RS_UPDATE_CHECK=false
+Environment=YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
+ExecStart=/usr/local/bin/cua-driver serve --socket %h/.cache/cua-driver/cua-driver.sock
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target
+UNIT
+
+cat > /etc/systemd/user/cua-driver-mcp.service <<'UNIT'
+[Unit]
+Description=Cua Driver MCP over Streamable HTTP (:3000)
+After=graphical-session.target cua-driver.service
+Wants=cua-driver.service
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+Environment=CUA_DRIVER_RS_ENABLE_WAYLAND=1
+Environment=CUA_DRIVER_RS_UPDATE_CHECK=false
+ExecStart=/usr/local/bin/supergateway --stdio "/usr/local/bin/cua-driver mcp" --outputTransport streamableHttp --stateful --sessionTimeout 3600000 --port 3000 --streamableHttpPath /mcp --healthEndpoint /healthz --cors --logLevel none
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target
+UNIT
+chmod 0644 /etc/systemd/user/cua-driver.service /etc/systemd/user/cua-driver-mcp.service
+OVCMD
+RUN --mount=type=bind,from=cua-session,source=/,target=/ctx --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+mkdir -p /etc/systemd/user/graphical-session.target.wants
+ln -sf ../cua-driver.service /etc/systemd/user/graphical-session.target.wants/cua-driver.service
+ln -sf ../cua-driver-mcp.service /etc/systemd/user/graphical-session.target.wants/cua-driver-mcp.service
+OVCMD
+
+# Layer: cua-guest
+ARG TARGETARCH
+ENV ARCH=${TARGETARCH}
+RUN --mount=type=bind,from=cua-guest,source=/,target=/ctx --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+mkdir -p /etc/udev/rules.d
+cat > /etc/udev/rules.d/99-cua-uinput.rules <<'RULE'
+# cua-driver's isolated input route creates a virtual keyboard/pointer via
+# uinput and attaches it to its own master pair, so the user's focus and
+# pointer are never touched. The driver runs as the desktop user.
+KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"
+RULE
+chmod 0644 /etc/udev/rules.d/99-cua-uinput.rules
+OVCMD
+RUN --mount=type=bind,from=cua-guest,source=/,target=/ctx --mount=type=cache,id=charly-var-cache-pacman-pkg,dst=/var/cache/pacman/pkg,sharing=locked sh -c 'SH=/bin/sh; [ -x /bin/bash ] && SH=/bin/bash; exec "$SH"' sh <<'OVCMD'
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l|armv7|armhf) ARCH=arm ;;
+  *) ARCH=$BUILD_ARCH ;;
+esac
+export BUILD_ARCH ARCH
+set -e
+set -eu
+# Only meaningful where netplan exists (Debian/Ubuntu). On Arch/Omarchy
+# NetworkManager already DHCPs; writing a netplan would be inert.
+if [ -d /etc/netplan ]; then
+  cat > /etc/netplan/99-cua-dhcp.yaml <<'NETPLAN'
+# DHCP on whatever NIC the hypervisor presents (enp1s0 under KubeVirt,
+# ens3/enp0s3 under plain QEMU). Without it the guest never leases on Fleet.
+network:
+  version: 2
+  ethernets:
+    all-en:
+      match: {name: "en*"}
+      dhcp4: true
+      dhcp-identifier: mac
+    all-eth:
+      match: {name: "eth*"}
+      dhcp4: true
+      dhcp-identifier: mac
+NETPLAN
+  chmod 0600 /etc/netplan/99-cua-dhcp.yaml
+  echo "wrote /etc/netplan/99-cua-dhcp.yaml"
+else
+  echo "no /etc/netplan (NetworkManager distro) — skipping the DHCP netplan"
+fi
+OVCMD
+
+USER 1000
+# Image metadata
+LABEL ai.opencharly.version="2026.261.1747"
+LABEL ai.opencharly.box="cua-driver-test"
+LABEL ai.opencharly.uid="1000"
+LABEL ai.opencharly.gid="1000"
+LABEL ai.opencharly.user="user"
+LABEL ai.opencharly.home="/home/user"
+LABEL ai.opencharly.platform.distro='["arch"]'
+LABEL ai.opencharly.platform.format='["pac"]'
+LABEL ai.opencharly.description='{"candy":[{"origin":"candy:cua-driver","description":"The Cua Driver binary (trycua/cua) — the background computer-use driver that\ndrives a desktop'\''s apps via the AT-SPI accessibility tree and input, with\nwindow enumeration and screenshots. Installs the pinned release archive into\n/opt/cua-driver (the binary'\''s aux files resolve relative to its real path, so\nthey stay together) and symlinks /usr/local/bin/cua-driver into it, plus the\nruntime libraries the binary links against (libxi, glibc, libxkbcommon) and the\nAT-SPI bus. The driver runs as a desktop-session daemon; the `cua-session`\ncandy wires that. Verifiable on the built image: the binary and its aux files\nare present and `cua-driver --version` prints a version.\n","plan":[{"run":"symlink the driver and its cursor-theme compiler onto PATH","plugin":"command","plugin_input":{"command":"set -eu\nln -sf /opt/cua-driver/cua-driver /usr/local/bin/cua-driver\nln -sf /opt/cua-driver/cua-cursor-theme /usr/local/bin/cua-cursor-theme\n"},"run_as":"root","intent_do":"act"},{"run":"disable Cua Driver'\''s default-on content-free telemetry (an unattended CI image should not phone home; the operator can re-enable it)","plugin":"command","plugin_input":{"command":"set -eu\n# `telemetry disable` writes the preference under the user'\''s home. At\n# build time that is the image user'\''s home; a persistent preference\n# survives upgrades. Best-effort: an older build without the subcommand\n# must not fail the image.\ncua-driver telemetry disable 2\u003e/dev/null || true\n"},"run_as":"${USER}","intent_do":"act"},{"check":"the Cua Driver binary and its aux files are installed together","plugin":"command","id":"cua-driver-installed","context":["build"],"plugin_input":{"command":"set -eu\nfor f in cua-driver cua-cursor-theme libcua_driver_sdk.so cua_driver_node_runtime.node; do\n  test -e \"/opt/cua-driver/$f\" || { echo \"missing: /opt/cua-driver/$f\" \u003e\u00262; exit 1; }\ndone\ntest -x /usr/local/bin/cua-driver || { echo \"missing symlink /usr/local/bin/cua-driver\" \u003e\u00262; exit 1; }\n"},"intent_do":"assert","exit_status":0},{"check":"the driver resolves its aux files and prints a version (proves the real-path aux resolution works through the symlink)","plugin":"command","id":"cua-driver-version","context":["build"],"plugin_input":{"command":"cua-driver --version"},"intent_do":"assert","exit_status":0,"stdout":[{"op":"matches","value":"[0-9]+\\.[0-9]+\\.[0-9]+"}]}]},{"origin":"candy:cua-guest","description":"The guest-side fixings Cua Driver needs on a Wayland desktop: the udev rule\nthat makes /dev/uinput group-accessible (the isolated-background-input route),\nand — only where netplan exists — a DHCP netplan so a cloud/containerDisk guest\nleases on whatever NIC the hypervisor presents (enp1s0 under KubeVirt, ens3\nunder QEMU). On NetworkManager distros the netplan is skipped. Verifiable on\nthe built image: the udev rule is present and the input group exists.\n","plan":[{"run":"install the uinput udev rule (the isolated-background-input route needs a group-accessible /dev/uinput)","plugin":"command","plugin_input":{"command":"set -eu\nmkdir -p /etc/udev/rules.d\ncat \u003e /etc/udev/rules.d/99-cua-uinput.rules \u003c\u003c'\''RULE'\''\n# cua-driver'\''s isolated input route creates a virtual keyboard/pointer via\n# uinput and attaches it to its own master pair, so the user'\''s focus and\n# pointer are never touched. The driver runs as the desktop user.\nKERNEL==\"uinput\", MODE=\"0660\", GROUP=\"input\", OPTIONS+=\"static_node=uinput\"\nRULE\nchmod 0644 /etc/udev/rules.d/99-cua-uinput.rules\n"},"run_as":"root","intent_do":"act"},{"run":"write the DHCP netplan so a cloud/containerDisk guest leases on the hypervisor NIC (netplan distros only)","plugin":"command","plugin_input":{"command":"set -eu\n# Only meaningful where netplan exists (Debian/Ubuntu). On Arch/Omarchy\n# NetworkManager already DHCPs; writing a netplan would be inert.\nif [ -d /etc/netplan ]; then\n  cat \u003e /etc/netplan/99-cua-dhcp.yaml \u003c\u003c'\''NETPLAN'\''\n# DHCP on whatever NIC the hypervisor presents (enp1s0 under KubeVirt,\n# ens3/enp0s3 under plain QEMU). Without it the guest never leases on Fleet.\nnetwork:\n  version: 2\n  ethernets:\n    all-en:\n      match: {name: \"en*\"}\n      dhcp4: true\n      dhcp-identifier: mac\n    all-eth:\n      match: {name: \"eth*\"}\n      dhcp4: true\n      dhcp-identifier: mac\nNETPLAN\n  chmod 0600 /etc/netplan/99-cua-dhcp.yaml\n  echo \"wrote /etc/netplan/99-cua-dhcp.yaml\"\nelse\n  echo \"no /etc/netplan (NetworkManager distro) — skipping the DHCP netplan\"\nfi\n"},"run_as":"root","intent_do":"act"},{"check":"the uinput udev rule is installed (the isolated-input route needs it)","plugin":"file","id":"cua-guest-uinput-rule","context":["build"],"plugin_input":{"contains":["KERNEL==\"uinput\"","GROUP=\"input\""],"file":"/etc/udev/rules.d/99-cua-uinput.rules"},"intent_do":"assert"},{"check":"the netplan was written only where netplan exists (correct on both NetworkManager and netplan distros)","plugin":"command","id":"cua-guest-netplan-conditional","context":["build"],"plugin_input":{"command":"set -eu\nif [ -d /etc/netplan ]; then\n  test -f /etc/netplan/99-cua-dhcp.yaml || { echo \"netplan distro but no DHCP netplan written\" \u003e\u00262; exit 1; }\nelse\n  test ! -f /etc/netplan/99-cua-dhcp.yaml || { echo \"netplan written on a non-netplan distro\" \u003e\u00262; exit 1; }\nfi\n"},"intent_do":"assert","exit_status":0}]},{"origin":"candy:cua-session","description":"Wires Cua Driver into the logged-in graphical session as systemd USER units —\nthe daemon (`cua-driver serve`) and its MCP endpoint (`cua-driver mcp` behind\nsupergateway on :3000). The driver cannot run outside the session (it needs\nWAYLAND_DISPLAY / XDG_RUNTIME_DIR / the AT-SPI bus), so the units are gated on\ngraphical-session.target and carry ConditionEnvironment=WAYLAND_DISPLAY. The\ndesktop account is resolved from uid 1000 at install time, so the candy\ncomposes onto any single-user desktop. Verifiable on the built image: the two\nunit files exist and are enabled under graphical-session.target.wants.\n","plan":[{"run":"install supergateway (the stdio→Streamable-HTTP MCP bridge the driver-mcp unit runs) — best-effort; the MCP endpoint is optional and the daemon works without it","plugin":"command","plugin_input":{"command":"set -eu\n# supergateway is `npm install -g supergateway`. It is OPTIONAL: the\n# cua-driver daemon is the core, and the :3000 MCP endpoint is a bridge\n# in front of it. A guest without nodejs simply has no :3000 endpoint.\nif command -v npm \u003e/dev/null 2\u003e\u00261; then\n  npm install -g --no-fund --no-audit supergateway\n  ln -sf \"$(npm prefix -g)/bin/supergateway\" /usr/local/bin/supergateway 2\u003e/dev/null || true\nelse\n  echo \"npm absent — the optional cua-driver-mcp :3000 unit will not start (compose a nodejs candy to enable it)\" \u003e\u00262\nfi\n"},"run_as":"root","intent_do":"act"},{"run":"write the Cua Driver session units (global systemd user units)","plugin":"command","plugin_input":{"command":"set -eu\nmkdir -p /etc/systemd/user\ncat \u003e /etc/systemd/user/cua-driver.service \u003c\u003c'\''UNIT'\''\n[Unit]\nDescription=Cua Driver daemon for the desktop session\nAfter=graphical-session.target\nPartOf=graphical-session.target\nConditionEnvironment=WAYLAND_DISPLAY\n\n[Service]\nType=simple\nEnvironment=CUA_DRIVER_RS_ENABLE_WAYLAND=1\nEnvironment=CUA_DRIVER_RS_UPDATE_CHECK=false\nEnvironment=YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket\nExecStart=/usr/local/bin/cua-driver serve --socket %h/.cache/cua-driver/cua-driver.sock\nRestart=always\nRestartSec=3\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=graphical-session.target\nUNIT\n\ncat \u003e /etc/systemd/user/cua-driver-mcp.service \u003c\u003c'\''UNIT'\''\n[Unit]\nDescription=Cua Driver MCP over Streamable HTTP (:3000)\nAfter=graphical-session.target cua-driver.service\nWants=cua-driver.service\nPartOf=graphical-session.target\nConditionEnvironment=WAYLAND_DISPLAY\n\n[Service]\nType=simple\nEnvironment=CUA_DRIVER_RS_ENABLE_WAYLAND=1\nEnvironment=CUA_DRIVER_RS_UPDATE_CHECK=false\nExecStart=/usr/local/bin/supergateway --stdio \"/usr/local/bin/cua-driver mcp\" --outputTransport streamableHttp --stateful --sessionTimeout 3600000 --port 3000 --streamableHttpPath /mcp --healthEndpoint /healthz --cors --logLevel none\nRestart=always\nRestartSec=3\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=graphical-session.target\nUNIT\nchmod 0644 /etc/systemd/user/cua-driver.service /etc/systemd/user/cua-driver-mcp.service\n"},"run_as":"root","intent_do":"act"},{"run":"enable the units for the desktop user'\''s graphical session (global user units; systemd enables them for every user)","plugin":"command","plugin_input":{"command":"set -eu\nmkdir -p /etc/systemd/user/graphical-session.target.wants\nln -sf ../cua-driver.service /etc/systemd/user/graphical-session.target.wants/cua-driver.service\nln -sf ../cua-driver-mcp.service /etc/systemd/user/graphical-session.target.wants/cua-driver-mcp.service\n"},"run_as":"root","intent_do":"act"},{"check":"the two Cua Driver session units exist","plugin":"file","id":"cua-session-units-present","context":["build"],"plugin_input":{"exists":true,"file":"/etc/systemd/user/cua-driver.service"},"intent_do":"assert"},{"check":"the driver daemon unit is enabled for graphical-session.target","plugin":"command","id":"cua-session-driver-enabled","context":["build"],"plugin_input":{"command":"set -eu\ntest -L /etc/systemd/user/graphical-session.target.wants/cua-driver.service\ngrep -q '\''WantedBy=graphical-session.target'\'' /etc/systemd/user/cua-driver.service\n"},"intent_do":"assert","exit_status":0},{"check":"the units gate on a live Wayland session (the driver cannot run outside it)","plugin":"command","id":"cua-session-wayland-gate","context":["build"],"plugin_input":{"command":"grep -q '\''ConditionEnvironment=WAYLAND_DISPLAY'\'' /etc/systemd/user/cua-driver.service"},"intent_do":"assert","exit_status":0}]}],"box":[{"origin":"box:cua-driver-test","description":"minimal Arch box composing the layer-cua driver + session + guest candies"}]}'
+LABEL ai.opencharly.status="testing"
+LABEL ai.opencharly.check_level="noagent"
+LABEL ai.opencharly.info='minimal Arch box composing the layer-cua driver + session + guest candies; cua-driver: The Cua Driver binary (trycua/cua) — the background computer-use driver that; cua-session: Wires Cua Driver into the logged-in graphical session as systemd USER units —; cua-guest: The guest-side fixings Cua Driver needs on a Wayland desktop: the udev rule'
+LABEL ai.opencharly.candy_version='{"cua-driver":"2026.261.1747","cua-guest":"2026.261.1747","cua-session":"2026.261.1747"}'
+
