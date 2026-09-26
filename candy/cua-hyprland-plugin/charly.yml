@@ -39,6 +39,11 @@ cua-hyprland-plugin:
                     - cmake
                     - ninja
                     - git
+                    # The plugin is C++; cmake needs a CXX compiler. `base-devel` is the
+                    # Arch meta-package that guarantees gcc/make — WITHOUT it the build dies
+                    # at `CMakeLists.txt:3 (project): No CMAKE_CXX_COMPILER could be found`
+                    # (measured on the in-repo cua-hyprland-plugin-test box).
+                    - base-devel
                     # Hyprland's headers for the exact installed compositor version: on
                     # Arch this is the hyprland package itself (which ships the headers).
                     - hyprland
@@ -100,6 +105,25 @@ cua-hyprland-plugin:
                   LUA
                   chown "$u:$u" "$hd/cua-plugin.lua" 2>/dev/null || true
 
+                  # WRITING the include is not enough: Omarchy's hyprland.lua loads a FIXED
+                  # require() list (default.hypr.*, hypr.*), so an unreferenced file is never
+                  # executed and the plugin stays UNLOADED — measured: the driver refused
+                  # foreground input with `foreground_unavailable: production Hyprland input
+                  # plugin is unavailable`, and `hyprctl plugin list` reported none. Append the
+                  # require to hyprland.lua (idempotently, after Omarchy's own requires so the
+                  # qualified layout wins). Skipped with a clear note if the config is not Lua.
+                  hl="$hd/hyprland.lua"
+                  if [ -f "$hl" ]; then
+                    # bootstrap.lua puts ~/.config/?.lua on package.path, so `require("hypr.X")`
+                    # resolves to ~/.config/hypr/X.lua — the exact file written above.
+                    if ! grep -q 'require("hypr.cua-plugin")' "$hl"; then
+                      printf '\nrequire("hypr.cua-plugin")\n' >> "$hl"
+                    fi
+                    chown "$u:$u" "$hl" 2>/dev/null || true
+                  else
+                    echo "no hyprland.lua (non-Lua Hyprland config) — the plugin include was written but must be sourced by hand" >&2
+                  fi
+
             - check: the opt-in plugin ships its load config, and the .so is present when the guest has Hyprland
               id: cua-hyprland-plugin-artifacts
               context:
@@ -112,3 +136,33 @@ cua-hyprland-plugin:
                     test -f /usr/lib/cua/hyprland/cua-hyprland-plugin.so || { echo "Hyprland present but plugin .so missing" >&2; exit 1; }
                   fi
                   echo "cua-hyprland-plugin artifacts checked"
+
+            - check: the plugin is actually WIRED into the compositor's config (not merely present)
+              id: cua-hyprland-plugin-wired
+              context:
+                - build
+              exit_status: 0
+              command: |
+                  set -eu
+                  # WRITING the include is not loading it: Omarchy's hyprland.lua loads a FIXED
+                  # require() list, so an unreferenced cua-plugin.lua is never executed and the
+                  # plugin stays UNLOADED (the defect this check exists to catch — the driver
+                  # refused input with `foreground_unavailable`). Assert the require is present
+                  # in hyprland.lua whenever the plugin was built. FAILS without the fix.
+                  if [ ! -f /usr/lib/cua/hyprland/cua-hyprland-plugin.so ]; then
+                    echo "plugin not built (skipped) — nothing to wire"
+                    exit 0
+                  fi
+                  u="$(getent passwd 1000 | cut -d: -f1)"
+                  hl="/home/$u/.config/hypr/hyprland.lua"
+                  # A plain Arch base has NO Omarchy Lua config, so the candy's load step
+                  # correctly writes cua-plugin.lua but cannot wire it — that guest has no
+                  # require() list to append to. Only assert the wiring where the config the
+                  # candy targets actually exists (the Omarchy guest the consumer bed uses).
+                  if [ ! -f "$hl" ]; then
+                    echo "no Hyprland Lua config on this guest (non-Omarchy base) — the candy wrote its include; nothing to wire"
+                    exit 0
+                  fi
+                  grep -q 'require("hypr.cua-plugin")' "$hl" \
+                    || { echo "the plugin include is written but hyprland.lua never requires it — the plugin will NOT load" >&2; exit 1; }
+                  echo "cua-hyprland-plugin is wired into hyprland.lua"

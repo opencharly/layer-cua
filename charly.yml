@@ -77,3 +77,62 @@ cua-driver-test:
             - cua-driver
             - cua-session
             - cua-guest
+
+# cua-hyprland-plugin-test — the IN-REPO bed that COMPOSES the opt-in plugin candy, so its
+# plan (the plugin BUILD + the "load it from the Hyprland config" run step) and its checks
+# execute against a real build, not a hand-typed equivalent. The base is Arch with the
+# Hyprland package (which ships the headers the plugin builds against).
+#
+# The candy's load step APPENDS `require("hypr.cua-plugin")` to an EXISTING
+# ~/.config/hypr/hyprland.lua (the Omarchy Lua config). A plain Arch base has none, so the
+# fixture candy below seeds a minimal Omarchy-shaped hyprland.lua FIRST; the plugin candy
+# then REQUIRES it, so the order is guaranteed and the changed append branch actually runs.
+cua-hyprland-fixture:
+    candy:
+        version: 2026.261.1747
+        description: test-only fixture seeding a minimal Omarchy-shaped ~/.config/hypr/hyprland.lua so the opt-in plugin candy's config-wiring step has a real config to append to
+        distro:
+            arch:
+                package:
+                    - bash
+        plan:
+            - run: seed a minimal Omarchy-shaped Hyprland Lua config the plugin candy can append to
+              run_as: root
+              command: |
+                  set -eu
+                  u="$(getent passwd 1000 | cut -d: -f1)"
+                  test -n "$u"
+                  hd="/home/$u/.config/hypr"
+                  mkdir -p "$hd"
+                  # Shaped like Omarchy's: a dofile bootstrap + a FIXED require() list, so the
+                  # plugin candy's append has something realistic to extend.
+                  cat > "$hd/hyprland.lua" <<'LUA'
+                  -- Minimal Omarchy-shaped fixture (test-only).
+                  require("default.hypr.omarchy")
+                  require("hypr.monitors")
+                  require("hypr.input")
+                  LUA
+                  chown -R "$u:$u" "$hd"
+            - check: the seeded Hyprland Lua config exists and carries the require()-list shape
+              id: cua-hyprland-fixture-seeded
+              context:
+                - build
+              exit_status: 0
+              command: |
+                  set -eu
+                  u="$(getent passwd 1000 | cut -d: -f1)"
+                  hl="/home/$u/.config/hypr/hyprland.lua"
+                  test -f "$hl" || { echo "fixture hyprland.lua missing" >&2; exit 1; }
+                  grep -q 'require("default.hypr.omarchy")' "$hl" || { echo "fixture not Omarchy-shaped" >&2; exit 1; }
+                  echo "fixture hyprland.lua seeded"
+cua-hyprland-plugin-test:
+    candy:
+        description: Arch box composing the opt-in cua-hyprland-plugin candy (builds the ABI-pinned plugin + wires it into the Hyprland config), over a fixture that provides the Omarchy-shaped config
+        base: quay.io/archlinux/archlinux:base-20260719.0.558306
+        build:
+            - pac
+        distro:
+            - arch
+        candy:
+            - cua-hyprland-fixture
+            - cua-hyprland-plugin
