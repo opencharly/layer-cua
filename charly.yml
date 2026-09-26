@@ -77,3 +77,20 @@ cua-driver-test:
             - cua-driver
             - cua-session
             - cua-guest
+
+# cua-hyprland-plugin-test — the IN-REPO bed that COMPOSES the opt-in plugin candy, so its
+# plan (the plugin BUILD + the "load it from the Hyprland config" run step) and its checks
+# execute against a real build, not a hand-typed equivalent. The base is Arch with the
+# Hyprland package (which ships the headers the plugin builds against); the candy's own
+# step writes the Hyprland config include AND requires it, and `charly check box` asserts
+# both. This box is the candy's own R10 witness.
+cua-hyprland-plugin-test:
+    candy:
+        description: Arch box composing the opt-in cua-hyprland-plugin candy (builds the ABI-pinned plugin + wires it into the Hyprland config)
+        base: quay.io/archlinux/archlinux:base-20260719.0.558306
+        build:
+            - pac
+        distro:
+            - arch
+        candy:
+            - cua-hyprland-plugin
