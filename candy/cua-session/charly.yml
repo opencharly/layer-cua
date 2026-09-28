@@ -19,10 +19,8 @@
 #  NOTE on scope: a container image has no running systemd-user session at BUILD time, so
 #  these units are INSTALLED and enabled but never started during the build — they come up
 #  when the desktop session does. That is the intended shape for a desktop VM.
-version: 2026.261.1747
 cua-session:
     candy:
-        version: 2026.261.1747
         description: |
             Wires Cua Driver into the logged-in graphical session as systemd USER units —
             the daemon (`cua-driver serve`) and its MCP endpoint (`cua-driver mcp` behind
