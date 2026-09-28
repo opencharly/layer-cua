@@ -9,10 +9,8 @@
 #  Installed as a Python venv under /opt/cua-computer-server (the image's own layout),
 #  started by a systemd USER unit in the desktop session (it uses the driver, which is a
 #  session daemon). Depends on cua-driver + cua-session.
-version: 2026.261.1747
 cua-computer-server:
     candy:
-        version: 2026.261.1747
         description: |
             The Cua computer-server (HTTP/WS + MCP on :8000) driving the local desktop
             through the embedded Cua Driver — the guest service a Cua Fleet pool probes for
@@ -32,45 +30,43 @@ cua-computer-server:
             - run: create the computer-server venv and install cua-computer-server with the driver backend
               run_as: root
               command: |
-                  set -eu
-                  python -m venv /opt/cua-computer-server/venv
-                  /opt/cua-computer-server/venv/bin/pip install --no-cache-dir --upgrade pip
-                  # [driver] pulls the generated Cua Driver native binding so the server can
-                  # run `--backend cua-driver --driver-mode embedded` (in-process, no daemon).
-                  /opt/cua-computer-server/venv/bin/pip install --no-cache-dir 'cua-computer-server[driver]'
-
+                set -eu
+                python -m venv /opt/cua-computer-server/venv
+                /opt/cua-computer-server/venv/bin/pip install --no-cache-dir --upgrade pip
+                # [driver] pulls the generated Cua Driver native binding so the server can
+                # run `--backend cua-driver --driver-mode embedded` (in-process, no daemon).
+                /opt/cua-computer-server/venv/bin/pip install --no-cache-dir 'cua-computer-server[driver]'
             - run: write and enable the computer-server user unit (:8000, embedded driver on the desktop)
               run_as: root
               command: |
-                  set -eu
-                  cat > /etc/systemd/user/computer-server.service <<'UNIT'
-                  [Unit]
-                  Description=Cua computer server (HTTP/WS/MCP :8000)
-                  After=graphical-session.target cua-driver.service
-                  Wants=cua-driver.service
-                  PartOf=graphical-session.target
-                  ConditionEnvironment=WAYLAND_DISPLAY
+                set -eu
+                cat > /etc/systemd/user/computer-server.service <<'UNIT'
+                [Unit]
+                Description=Cua computer server (HTTP/WS/MCP :8000)
+                After=graphical-session.target cua-driver.service
+                Wants=cua-driver.service
+                PartOf=graphical-session.target
+                ConditionEnvironment=WAYLAND_DISPLAY
 
-                  [Service]
-                  Type=simple
-                  Environment=CUA_BACKEND=cua-driver
-                  Environment=CUA_DRIVER_MODE=embedded
-                  Environment=CUA_DRIVER_CAPTURE_SCOPE=desktop
-                  Environment=CUA_DRIVER_RS_ENABLE_WAYLAND=1
-                  Environment=YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-                  ExecStart=/opt/cua-computer-server/venv/bin/python -m computer_server --host 0.0.0.0 --port 8000 --backend cua-driver --driver-mode embedded --capture-scope desktop
-                  Restart=always
-                  RestartSec=3
-                  StandardOutput=journal
-                  StandardError=journal
+                [Service]
+                Type=simple
+                Environment=CUA_BACKEND=cua-driver
+                Environment=CUA_DRIVER_MODE=embedded
+                Environment=CUA_DRIVER_CAPTURE_SCOPE=desktop
+                Environment=CUA_DRIVER_RS_ENABLE_WAYLAND=1
+                Environment=YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
+                ExecStart=/opt/cua-computer-server/venv/bin/python -m computer_server --host 0.0.0.0 --port 8000 --backend cua-driver --driver-mode embedded --capture-scope desktop
+                Restart=always
+                RestartSec=3
+                StandardOutput=journal
+                StandardError=journal
 
-                  [Install]
-                  WantedBy=graphical-session.target
-                  UNIT
-                  chmod 0644 /etc/systemd/user/computer-server.service
-                  mkdir -p /etc/systemd/user/graphical-session.target.wants
-                  ln -sf ../computer-server.service /etc/systemd/user/graphical-session.target.wants/computer-server.service
-
+                [Install]
+                WantedBy=graphical-session.target
+                UNIT
+                chmod 0644 /etc/systemd/user/computer-server.service
+                mkdir -p /etc/systemd/user/graphical-session.target.wants
+                ln -sf ../computer-server.service /etc/systemd/user/graphical-session.target.wants/computer-server.service
             - check: the computer-server venv python exists
               id: cua-computer-server-venv
               context:
@@ -78,14 +74,13 @@ cua-computer-server:
               file:
                 file: /opt/cua-computer-server/venv/bin/python
                 exists: true
-
             - check: the computer-server unit runs the driver backend on :8000 (the Cua Fleet readiness contract)
               id: cua-computer-server-unit
               context:
                 - build
               exit_status: 0
               command: |
-                  set -eu
-                  grep -q 'port 8000' /etc/systemd/user/computer-server.service
-                  grep -q 'backend cua-driver' /etc/systemd/user/computer-server.service
-                  grep -q 'driver-mode embedded' /etc/systemd/user/computer-server.service
+                set -eu
+                grep -q 'port 8000' /etc/systemd/user/computer-server.service
+                grep -q 'backend cua-driver' /etc/systemd/user/computer-server.service
+                grep -q 'driver-mode embedded' /etc/systemd/user/computer-server.service
