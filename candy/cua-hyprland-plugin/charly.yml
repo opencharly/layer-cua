@@ -18,10 +18,8 @@
 #  (`hyprctl -j cua:status` reports `abi.match:true`) — failing closed on a mismatch.
 #  On a distro whose Hyprland headers are not installable, the candy SKIPS the build
 #  (the portable driver still works without it).
-version: 2026.261.1747
 cua-hyprland-plugin:
     candy:
-        version: 2026.261.1747
         description: |
             The OPT-IN, ABI-pinned Cua Driver Hyprland plugin for isolated background
             input — built for the exact Hyprland version/toolchain the guest runs. It is
