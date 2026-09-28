@@ -9,10 +9,8 @@
 #  Installed as a Python venv under /opt/cua-computer-server (the image's own layout),
 #  started by a systemd USER unit in the desktop session (it uses the driver, which is a
 #  session daemon). Depends on cua-driver + cua-session.
-version: 2026.261.1747
 cua-computer-server:
     candy:
-        version: 2026.261.1747
         description: |
             The Cua computer-server (HTTP/WS + MCP on :8000) driving the local desktop
             through the embedded Cua Driver — the guest service a Cua Fleet pool probes for
