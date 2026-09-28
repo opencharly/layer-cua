@@ -15,10 +15,8 @@
 #      write is guarded on /etc/netplan's presence so the candy is correct on both.
 #
 #  This candy is deliberately distro-light and idempotent.
-version: 2026.261.1747
 cua-guest:
     candy:
-        version: 2026.261.1747
         description: |
             The guest-side fixings Cua Driver needs on a Wayland desktop: the udev rule
             that makes /dev/uinput group-accessible (the isolated-background-input route),
