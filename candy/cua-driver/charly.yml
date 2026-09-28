@@ -15,10 +15,8 @@
 #  The driver is a USER-SESSION daemon — this candy only installs the binary; the session
 #  wiring is the sibling `cua-session` candy. The opt-in Hyprland isolated-input plugin is
 #  `cua-hyprland-plugin`.
-version: 2026.261.1747
 cua-driver:
     candy:
-        version: 2026.261.1747
         description: |
             The Cua Driver binary (trycua/cua) — the background computer-use driver that
             drives a desktop's apps via the AT-SPI accessibility tree and input, with
