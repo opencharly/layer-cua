@@ -1,13 +1,13 @@
-# layer-cua
+# cua
 
-Cua Driver ([trycua/cua](https://github.com/trycua/cua)) on a live desktop, as OpenCharly
-candies.
+Cua Driver ([trycua/cua](https://github.com/trycua/cua)) on a live desktop, as
+OpenCharly candies.
 
-Cua Driver is the background computer-use driver: it drives a desktop's apps through the
-accessibility (AT-SPI) tree and input, enumerates windows, and captures screenshots. These
-candies install and wire it into a desktop VM/pod. The `cua` plugin
-([`opencharly/plugin-cua`](https://github.com/opencharly/plugin-cua)) then drives it from a
-charly `cua:` plan step.
+Cua Driver is the background computer-use driver: it drives a desktop's apps
+through the accessibility (AT-SPI) tree and input, enumerates windows, and
+captures screenshots. These candies install and wire it into a desktop VM/pod.
+The `cua` plugin ([`opencharly/plugin-cua`](https://github.com/opencharly/plugin-cua))
+then drives it from a charly `cua:` plan step.
 
 ## Candies
 
@@ -21,13 +21,14 @@ charly `cua:` plan step.
 
 ## Why the pieces are split
 
-- The driver is a **user-session daemon**, not a system service: the session wiring is its
-  own candy (`cua-session`) so a box can install the binary without starting it.
-- The **Hyprland plugin has no stable ABI**. Pulling it in automatically would ship a
-  plugin that fails to load after any Hyprland upgrade, so it is opt-in and fail-closed
-  (`hyprctl -j cua:status` must report `abi.match:true`).
-- The **computer-server** is separate because it is the Cua Fleet *readiness* contract, not
-  a requirement of local driver use.
+- The driver is a **user-session daemon**, not a system service: the session
+  wiring is its own candy (`cua-session`) so a box can install the binary without
+  starting it.
+- The **Hyprland plugin has no stable ABI**. Pulling it in automatically would
+  ship a plugin that fails to load after any Hyprland upgrade, so it is opt-in and
+  fail-closed (`hyprctl -j cua:status` must report `abi.match:true`).
+- The **computer-server** is separate because it is the Cua Fleet *readiness*
+  contract, not a requirement of local driver use.
 
 ## Composing
 
@@ -44,16 +45,37 @@ my-desktop:
             - '@github.com/opencharly/layer-cua/candy/cua-hyprland-plugin:v…'
 ```
 
-The check beds in `opencharly/distro-omarchy` (`check-cua-*`) compose these onto the
-Omarchy VM and assert the driver contract on a real desktop.
+The check beds in `opencharly/distro-omarchy` (`check-cua-*`) compose these onto
+the Omarchy VM and assert the driver contract on a real desktop.
 
 ## Verified against
 
-The pinned driver release and the guest contract were established empirically against the
-Cua Omarchy Fleet image (`public.ecr.aws/k5j5w0x5/cua-omarchy-workspace`,
-Omarchy 4.0.2 / Hyprland 0.56.2 / Driver 0.26.1) — see `opencharly/plan/cua-integration.md`.
+The pinned driver release and the guest contract were established empirically
+against the Cua Omarchy Fleet image (`public.ecr.aws/k5j5w0x5/cua-omarchy-workspace`,
+Omarchy 4.0.2 / Hyprland 0.56.2 / Driver 0.26.1) — see
+`opencharly/plan/cua-integration.md`.
+
+## Layout
+
+- `charly.yml` — the `check-cua-driver-box` bed and the test-only fixture /
+  plugin boxes that compose the candies.
+- `candy/cua-driver`, `candy/cua-session`, `candy/cua-computer-server`,
+  `candy/cua-guest`, `candy/cua-hyprland-plugin` — one candy per member.
+- `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
+- `README.md` — this user overview.
+
+## Related
+
+- Owning skill: `/charly-check:cua` — the `cua:` check/control verb reference
+  (owned by `layer-charly-check`; this repo's candies declare no `skill:` entity
+  of their own, a gap tracked in
+  [opencharly/opencharly#291](https://github.com/opencharly/opencharly/issues/291))
+- Driver plugin: [`opencharly/plugin-cua`](https://github.com/opencharly/plugin-cua)
+- Consumers: `/charly-distros:omarchy` check beds (`check-cua-*`)
+- [`opencharly/charly`](https://github.com/opencharly/charly) — the charly CLI and image builder
+- [`opencharly/opencharly`](https://github.com/opencharly/opencharly) — the umbrella
 
 ## License
 
-MIT — see `LICENSE`. The candies install Cua's own MIT-licensed artifacts; no Cua code is
-vendored here.
+MIT — see `LICENSE`. The candies install Cua's own MIT-licensed artifacts; no
+Cua code is vendored here.
